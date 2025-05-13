@@ -1,34 +1,38 @@
-
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import requests
+from bs4 import BeautifulSoup
+import datetime
+
+st.set_page_config(page_title="Biotech Screener", layout="wide")
 
 st.title("🧬 Undervalued US Biotech Screener")
 st.markdown("""
-This app scans a preloaded list of **US-listed biotech companies** and identifies those where:
+This app scans **US-listed biotech companies** and identifies those where:
 
 **Cash per Share ≥ Current Stock Price**
 
 Great for spotting deep value or potential arbitrage in small caps.
 """)
 
-# Load cached CSV list of biotech tickers
-@st.cache_data(show_spinner=False)
-def load_biotech_tickers():
-    # Simulated CSV load (replace with actual file or URL)
-    data = {
-        "Ticker": ["BIIB", "VRTX", "REGN", "IONS", "NBIX", "SAGE", "ARWR", "ALNY", "BLUE"],
-        "Company": [
-            "Biogen Inc.", "Vertex Pharmaceuticals", "Regeneron Pharmaceuticals",
-            "Ionis Pharmaceuticals", "Neurocrine Biosciences", "Sage Therapeutics",
-            "Arrowhead Pharmaceuticals", "Alnylam Pharmaceuticals", "bluebird bio"
-        ],
-        "Sector": ["Biotechnology"] * 9
-    }
-    return pd.DataFrame(data)
+# Fetch biotech tickers from Finviz with 24-hour caching
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_biotech_tickers_from_finviz():
+    url = "https://finviz.com/screener.ashx?v=111&f=ind_biotechnology&o=-marketcap"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    tickers = []
+    for page in range(0, 10):  # 10 pages * 20 = 200 stocks
+        full_url = f"{url}&r={1 + page * 20}"
+        response = requests.get(full_url, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+        for row in soup.select("table.table-dark-row-cp tr[valign='top']"):
+            tds = row.find_all("td")
+            if tds:
+                tickers.append(tds[1].text.strip())
+    return tickers
 
-biotech_df = load_biotech_tickers()
-tickers = biotech_df["Ticker"].tolist()
+biotech_tickers = fetch_biotech_tickers_from_finviz()
 
 # Cash/share threshold
 threshold = st.sidebar.number_input(
@@ -68,7 +72,7 @@ def fetch_data(tickers, threshold):
 
 # Auto-run screener
 st.subheader("📊 Screening Results")
-df = fetch_data(tickers, threshold)
+df = fetch_data(biotech_tickers, threshold)
 
 if not df.empty:
     st.success(f"Found {len(df)} undervalued biotech companies!")
