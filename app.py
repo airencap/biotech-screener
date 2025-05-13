@@ -4,8 +4,8 @@ import yfinance as yf
 import plotly.graph_objects as go
 import requests
 
-st.set_page_config(page_title="Biotech Screener — With Trials", layout="wide")
-st.title("🧬 Biotech Screener — Price Charts + Clinical Trials")
+st.set_page_config(page_title="Biotech Screener — Improved Trials", layout="wide")
+st.title("🧬 Biotech Screener — Price Charts + Improved Clinical Trials")
 
 @st.cache_data
 def load_tickers_from_csv():
@@ -47,11 +47,12 @@ def screen_stocks(tickers):
 
     return pd.DataFrame(results), pd.DataFrame(skipped)
 
-def fetch_clinical_trials(company_name):
+def fetch_clinical_trials(company_name, ticker):
     try:
+        expr = f"{ticker} OR {company_name}"
         base_url = "https://clinicaltrials.gov/api/query/study_fields"
         params = {
-            "expr": company_name,
+            "expr": expr,
             "fields": "Phase,Status,PrimaryCompletionDate",
             "min_rnk": 1,
             "max_rnk": 100,
@@ -61,6 +62,9 @@ def fetch_clinical_trials(company_name):
         data = response.json()
         studies = data.get("StudyFieldsResponse", {}).get("StudyFields", [])
 
+        if not studies:
+            return {"error": f"No studies found for {expr}"}
+
         phase_count = {}
         upcoming_dates = []
 
@@ -68,7 +72,6 @@ def fetch_clinical_trials(company_name):
             for phase in study.get("Phase", []):
                 if phase:
                     phase_count[phase] = phase_count.get(phase, 0) + 1
-
             date = study.get("PrimaryCompletionDate", [""])[0]
             if date:
                 upcoming_dates.append(date)
@@ -93,9 +96,10 @@ if not df.empty:
         with st.expander(f"{row['Ticker']} — {row['Company']} | Cash/Share: ${row['Cash/Share']}"):
             st.write(f"📈 Price: ${row['Price']}")
             if show_trials:
-                trials = fetch_clinical_trials(row['Company'])
+                with st.spinner(f"Looking up trials for {row['Company']}..."):
+                    trials = fetch_clinical_trials(row['Company'], row['Ticker'])
                 if "error" in trials:
-                    st.warning("ClinicalTrials.gov fetch failed.")
+                    st.warning(trials["error"])
                 else:
                     st.write(f"🧪 Total Trials: {trials['Total Trials']}")
                     st.write(f"📊 Trial Phases: {trials['Phases']}")
