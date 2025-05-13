@@ -38,7 +38,7 @@ def fetch_biotech_tickers_from_finviz():
     url = "https://finviz.com/screener.ashx?v=111&f=ind_biotechnology&o=-marketcap"
     headers = {'User-Agent': 'Mozilla/5.0'}
     tickers = []
-    for page in range(0, 10):
+    for page in range(0, 2): # Limit to 40 stocks for debugging
         full_url = f"{url}&r={1 + page * 20}"
         response = requests.get(full_url, headers=headers)
         soup = BeautifulSoup(response.text, "html.parser")
