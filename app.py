@@ -4,8 +4,8 @@ import yfinance as yf
 import plotly.graph_objects as go
 import requests
 
-st.set_page_config(page_title="Biotech Screener — Improved Trials", layout="wide")
-st.title("🧬 Biotech Screener — Price Charts + Improved Clinical Trials")
+st.set_page_config(page_title="Biotech Screener — Resilient Trials", layout="wide")
+st.title("🧬 Biotech Screener — Charts + Resilient Clinical Trials")
 
 @st.cache_data
 def load_tickers_from_csv():
@@ -59,11 +59,18 @@ def fetch_clinical_trials(company_name, ticker):
             "fmt": "json"
         }
         response = requests.get(base_url, params=params, timeout=10)
-        data = response.json()
-        studies = data.get("StudyFieldsResponse", {}).get("StudyFields", [])
 
+        if response.status_code != 200:
+            return {"error": f"API returned status {response.status_code}"}
+
+        try:
+            data = response.json()
+        except Exception:
+            return {"error": "Invalid JSON response from ClinicalTrials.gov"}
+
+        studies = data.get("StudyFieldsResponse", {}).get("StudyFields", [])
         if not studies:
-            return {"error": f"No studies found for {expr}"}
+            return {"error": f"No studies found for query: {expr}"}
 
         phase_count = {}
         upcoming_dates = []
@@ -99,7 +106,7 @@ if not df.empty:
                 with st.spinner(f"Looking up trials for {row['Company']}..."):
                     trials = fetch_clinical_trials(row['Company'], row['Ticker'])
                 if "error" in trials:
-                    st.warning(trials["error"])
+                    st.error(trials["error"])
                 else:
                     st.write(f"🧪 Total Trials: {trials['Total Trials']}")
                     st.write(f"📊 Trial Phases: {trials['Phases']}")
