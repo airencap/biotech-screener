@@ -65,7 +65,7 @@ def fetch_clinical_trials(expr):
 
         try:
             data = response.json()
-        except Exception:
+        except ValueError:
             return {"error": "Invalid JSON response from ClinicalTrials.gov"}
 
         studies = data.get("StudyFieldsResponse", {}).get("StudyFields", [])
@@ -92,10 +92,12 @@ def fetch_clinical_trials(expr):
         return {"error": str(e)}
 
 def get_trial_info(company_name, ticker):
-    company_name_clean = re.sub(r"[\/:*?"<>|]", "", company_name)
+    # Escape special characters: \ / : * ? " < > |
+    company_name_clean = re.sub(r'[\\/:*?"<>|]', "", company_name)
     first_attempt = fetch_clinical_trials(company_name_clean)
     if "error" not in first_attempt:
         return first_attempt
+    # Fallback to ticker-only search
     return fetch_clinical_trials(ticker)
 
 with st.spinner("Running screener..."):
