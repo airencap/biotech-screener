@@ -3,9 +3,10 @@ import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
 import requests
+import re
 
-st.set_page_config(page_title="Biotech Screener — Resilient Trials", layout="wide")
-st.title("🧬 Biotech Screener — Charts + Resilient Clinical Trials")
+st.set_page_config(page_title="Biotech Screener — Fallback Trials", layout="wide")
+st.title("🧬 Biotech Screener — Charts + Fallback Clinical Trials")
 
 @st.cache_data
 def load_tickers_from_csv():
@@ -47,9 +48,8 @@ def screen_stocks(tickers):
 
     return pd.DataFrame(results), pd.DataFrame(skipped)
 
-def fetch_clinical_trials(company_name, ticker):
+def fetch_clinical_trials(expr):
     try:
-        expr = f"{ticker} OR {company_name}"
         base_url = "https://clinicaltrials.gov/api/query/study_fields"
         params = {
             "expr": expr,
@@ -61,7 +61,7 @@ def fetch_clinical_trials(company_name, ticker):
         response = requests.get(base_url, params=params, timeout=10)
 
         if response.status_code != 200:
-            return {"error": f"API returned status {response.status_code}"}
+            return {"error": f"API returned status {response.status_code} for query: {expr}"}
 
         try:
             data = response.json()
@@ -91,6 +91,13 @@ def fetch_clinical_trials(company_name, ticker):
     except Exception as e:
         return {"error": str(e)}
 
+def get_trial_info(company_name, ticker):
+    company_name_clean = re.sub(r"[\/:*?"<>|]", "", company_name)
+    first_attempt = fetch_clinical_trials(company_name_clean)
+    if "error" not in first_attempt:
+        return first_attempt
+    return fetch_clinical_trials(ticker)
+
 with st.spinner("Running screener..."):
     df, skipped_df = screen_stocks(tickers)
 
@@ -104,7 +111,7 @@ if not df.empty:
             st.write(f"📈 Price: ${row['Price']}")
             if show_trials:
                 with st.spinner(f"Looking up trials for {row['Company']}..."):
-                    trials = fetch_clinical_trials(row['Company'], row['Ticker'])
+                    trials = get_trial_info(row['Company'], row['Ticker'])
                 if "error" in trials:
                     st.error(trials["error"])
                 else:
