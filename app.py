@@ -5,8 +5,8 @@ import plotly.graph_objects as go
 import requests
 import re
 
-st.set_page_config(page_title="Biotech Screener — Fallback Trials", layout="wide")
-st.title("🧬 Biotech Screener — Charts + Fallback Clinical Trials")
+st.set_page_config(page_title="Biotech Screener — Modern Trials", layout="wide")
+st.title("🧬 Biotech Screener — Price Charts + Modern ClinicalTrials.gov API")
 
 @st.cache_data
 def load_tickers_from_csv():
@@ -21,7 +21,6 @@ show_trials = st.sidebar.checkbox("🧪 Show Clinical Trials Data", value=False)
 def screen_stocks(tickers):
     results = []
     skipped = []
-
     for ticker in tickers:
         try:
             stock = yf.Ticker(ticker)
@@ -30,75 +29,54 @@ def screen_stocks(tickers):
             cash = info.get("totalCash")
             shares = info.get("sharesOutstanding")
             name = info.get("shortName", ticker)
-
             if not all([price, cash, shares]):
                 skipped.append({"Ticker": ticker, "Price": price, "Cash": cash, "Shares": shares})
                 continue
-
             cps = cash / shares
             if cps >= price * threshold:
-                results.append({
-                    "Ticker": ticker,
-                    "Company": name,
-                    "Price": price,
-                    "Cash/Share": round(cps, 2)
-                })
+                results.append({"Ticker": ticker, "Company": name, "Price": price, "Cash/Share": round(cps, 2)})
         except Exception as e:
             skipped.append({"Ticker": ticker, "Error": str(e)})
-
     return pd.DataFrame(results), pd.DataFrame(skipped)
 
 def fetch_clinical_trials(expr):
+    # Modern ClinicalTrials.gov API v2
+    url = "https://clinicaltrials.gov/api/v2/studies"
+    params = {
+        "query.cond": expr,
+        "pageSize": 100,
+        "format": "json",
+        "countTotal": "true"
+    }
     try:
-        base_url = "https://clinicaltrials.gov/api/query/study_fields"
-        params = {
-            "expr": expr,
-            "fields": "Phase,Status,PrimaryCompletionDate",
-            "min_rnk": 1,
-            "max_rnk": 100,
-            "fmt": "json"
-        }
-        response = requests.get(base_url, params=params, timeout=10)
-
-        if response.status_code != 200:
-            return {"error": f"API returned status {response.status_code} for query: {expr}"}
-
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON response from ClinicalTrials.gov"}
-
-        studies = data.get("StudyFieldsResponse", {}).get("StudyFields", [])
-        if not studies:
-            return {"error": f"No studies found for query: {expr}"}
-
-        phase_count = {}
-        upcoming_dates = []
-
-        for study in studies:
-            for phase in study.get("Phase", []):
-                if phase:
-                    phase_count[phase] = phase_count.get(phase, 0) + 1
-            date = study.get("PrimaryCompletionDate", [""])[0]
-            if date:
-                upcoming_dates.append(date)
-
-        return {
-            "Total Trials": len(studies),
-            "Phases": phase_count,
-            "Upcoming Dates": upcoming_dates[:3]
-        }
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
     except Exception as e:
-        return {"error": str(e)}
+        return {"Total Trials": 0, "Phases": {}, "Upcoming Dates": [], "error": str(e)}
+    total = data.get("totalCount", 0)
+    studies = data.get("studies", [])
+    phase_count = {}
+    upcoming = []
+    for study in studies:
+        status_mod = study.get("protocolSection", {}).get("statusModule", {})
+        # phases
+        for phase_item in status_mod.get("phaseList", []):
+            phase = phase_item.get("phase")
+            if phase:
+                phase_count[phase] = phase_count.get(phase, 0) + 1
+        # primary completion date
+        date = status_mod.get("primaryCompletionDateStruct", {}).get("date")
+        if date:
+            upcoming.append(date)
+    return {"Total Trials": total, "Phases": phase_count, "Upcoming Dates": upcoming[:3]}
 
 def get_trial_info(company_name, ticker):
-    # Escape special characters: \ / : * ? " < > |
-    company_name_clean = re.sub(r'[\\/:*?"<>|]', "", company_name)
-    first_attempt = fetch_clinical_trials(company_name_clean)
-    if "error" not in first_attempt:
-        return first_attempt
-    # Fallback to ticker-only search
-    return fetch_clinical_trials(ticker)
+    company_clean = re.sub(r'[\\/:*?"<>|]', "", company_name)
+    trials = fetch_clinical_trials(company_clean)
+    if trials.get("Total Trials", 0) == 0:
+        trials = fetch_clinical_trials(ticker)
+    return trials
 
 with st.spinner("Running screener..."):
     df, skipped_df = screen_stocks(tickers)
@@ -106,21 +84,16 @@ with st.spinner("Running screener..."):
 if not df.empty:
     st.success(f"{len(df)} companies matched.")
     st.dataframe(df)
-    st.download_button("📥 Download Results", df.to_csv(index=False), "biotech_matches.csv")
+    st.download_button("📥 Download Results", df.to_csv(index=False), "results.csv")
 
     for _, row in df.iterrows():
         with st.expander(f"{row['Ticker']} — {row['Company']} | Cash/Share: ${row['Cash/Share']}"):
             st.write(f"📈 Price: ${row['Price']}")
             if show_trials:
-                with st.spinner(f"Looking up trials for {row['Company']}..."):
-                    trials = get_trial_info(row['Company'], row['Ticker'])
-                if "error" in trials:
-                    st.error(trials["error"])
-                else:
-                    st.write(f"🧪 Total Trials: {trials['Total Trials']}")
-                    st.write(f"📊 Trial Phases: {trials['Phases']}")
-                    st.write(f"📅 Upcoming Completion Dates: {', '.join(trials['Upcoming Dates'])}")
-
+                trials = get_trial_info(row['Company'], row['Ticker'])
+                st.write(f"🧪 Total Trials: {trials.get('Total Trials',0)}")
+                st.write(f"📊 Trial Phases: {trials.get('Phases',{})}")
+                st.write(f"📅 Upcoming Completion Dates: {', '.join(trials.get('Upcoming Dates',[]))}")
     if show_charts:
         st.subheader("📉 1-Year Price Charts")
         for ticker in df["Ticker"]:
@@ -136,6 +109,6 @@ else:
     st.warning("No matches found.")
 
 if not skipped_df.empty:
-    with st.expander("🔍 Skipped Tickers (Missing or Invalid Data)"):
+    with st.expander("🔍 Skipped Tickers"):
         st.dataframe(skipped_df)
-        st.download_button("📄 Download Skipped", skipped_df.to_csv(index=False), "skipped_tickers.csv")
+        st.download_button("📄 Download Skipped", skipped_df.to_csv(index=False), "skipped.csv")
